@@ -1,10 +1,17 @@
 #include <enet/enet.h>
 #include <iostream>
+#include <string>
+#include <thread>
 using namespace std;
 
 ENetAddress address;
 ENetHost* server = nullptr;
 ENetHost* client = nullptr;
+
+std::thread ServerThread;
+std::thread ClientThread;
+
+bool quit = false;
 
 bool CreateServer() 
 {
@@ -34,6 +41,42 @@ bool CreateClient()
     return client != nullptr;
 }
 
+void GetInput(ENetHost* user, string userName) 
+{
+    while (!quit) 
+    {
+        string message;
+        getline(cin, message);
+
+        if (message == "quit") 
+        {
+            quit = true;
+            cout << "Exited chat" << endl;
+        }
+
+        else if (!message.empty())
+        {
+            /* Create a reliable packet of size 7 containing "packet\0" */
+            message = userName + ": " + message;
+            ENetPacket* packet = enet_packet_create(message.c_str(),
+                strlen(message.c_str()) + 1,
+                ENET_PACKET_FLAG_RELIABLE);
+            /* Extend the packet so and append the string "foo", so it now */
+            /* contains "packetfoo\0"                                      */
+            //enet_packet_resize(packet, strlen("packetfoo") + 1);
+            //strcpy(&packet->data[strlen("packet")], "foo");
+            /* Send the packet to the peer over channel id 0. */
+            /* One could also broadcast the packet by         */
+            enet_host_broadcast(user, 0, packet);
+            //enet_peer_send(event.peer, 0, packet);
+
+            /* One could just use enet_host_service() instead. */
+            //enet_host_service();
+            enet_host_flush(user);
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (enet_initialize() != 0)
@@ -60,15 +103,25 @@ int main(int argc, char** argv)
             exit(EXIT_FAILURE);
         }
 
-        while (1) {
+        string serverName;
+
+        cout << "Enter name: ";
+        cin >> serverName;
+
+        cout << "Connecting..." << endl;
+
+        ServerThread = std::thread (GetInput, server, serverName);
+
+        while (!quit) {
             ENetEvent event;
+
             /* Wait up to 1000 milliseconds for an event. */
             while (enet_host_service(server, &event, 1000) > 0)
             {
                 switch (event.type)
                 {
                 case ENET_EVENT_TYPE_CONNECT:
-                    cout << "A new client connected from "
+                    cout << serverName << " connected from "
                         << event.peer->address.host
                         << ":" << event.peer->address.port
                         << endl;
@@ -76,30 +129,11 @@ int main(int argc, char** argv)
                     /* Store any relevant client information here. */
                     event.peer->data = (void*)"Client information";
 
-                    {
-                        /* Create a reliable packet of size 7 containing "packet\0" */
-                        ENetPacket* packet = enet_packet_create("hello",
-                            strlen("hello") + 1,
-                            ENET_PACKET_FLAG_RELIABLE);
-                        /* Extend the packet so and append the string "foo", so it now */
-                        /* contains "packetfoo\0"                                      */
-                        //enet_packet_resize(packet, strlen("packetfoo") + 1);
-                        //strcpy(&packet->data[strlen("packet")], "foo");
-                        /* Send the packet to the peer over channel id 0. */
-                        /* One could also broadcast the packet by         */
-                        enet_host_broadcast(server, 0, packet);
-                        //enet_peer_send(event.peer, 0, packet);
-
-                        /* One could just use enet_host_service() instead. */
-                        //enet_host_service();
-                        enet_host_flush(server);
-                    }
+                    cout << "Type in a message to send! Type 'quit' to exit." << endl;
 
                     break;
                 case ENET_EVENT_TYPE_RECEIVE:
-                    cout << "A packet of length "
-                        << event.packet->dataLength << endl
-                        << "containing " << (char*)event.packet->data
+                    cout << (char*)event.packet->data
                         << endl;
                         //<< "was received from " << (char*)event.peer->data
                         //<< " on channel " << event.channelID << endl;
@@ -115,6 +149,8 @@ int main(int argc, char** argv)
                 }
             }
         }
+
+        ServerThread.join();
     }
     else if (userInput == 2) 
     {
@@ -124,6 +160,12 @@ int main(int argc, char** argv)
                 "An error occurred while trying to create an ENet client host.\n");
             exit(EXIT_FAILURE);
         }
+
+        string clientName;
+        cout << "Enter name: ";
+        cin >> clientName;
+
+        cout << "Connecting..." << endl;
 
         ENetAddress address;
         ENetEvent event;
@@ -144,6 +186,7 @@ int main(int argc, char** argv)
             event.type == ENET_EVENT_TYPE_CONNECT)
         {
             cout << "Connection to 127.0.0.1:1234 succeeded." << endl;
+            cout << "Type in a message to send! Type 'quit' to exit." << endl;
         }
         else
         {
@@ -154,40 +197,29 @@ int main(int argc, char** argv)
             cout << "Connection to 127.0.0.1:1234 failed." << endl;
         }
 
-        while (1) 
+        ClientThread = std::thread(GetInput, client, clientName);
+
+        while (!quit) 
         {
             ENetEvent event;
+
             /* Wait up to 1000 milliseconds for an event. */
             while (enet_host_service(client, &event, 1000) > 0)
             {
                 switch (event.type) 
                 {
                 case ENET_EVENT_TYPE_RECEIVE:
-                    cout << "A packet of length "
-                        << event.packet->dataLength << endl
-                        << "containing " << (char*)event.packet->data
+                    cout << (char*)event.packet->data
                         << endl;
                     /* Clean up the packet now that we're done using it. */
                     enet_packet_destroy(event.packet);
-
-                    {
-                        /* Create a reliable packet of size 7 containing "packet\0" */
-                        ENetPacket* packet = enet_packet_create("hi",
-                            strlen("hi") + 1,
-                            ENET_PACKET_FLAG_RELIABLE);
-
-                        enet_host_broadcast(client, 0, packet);
-                        //enet_peer_send(event.peer, 0, packet);
-
-                        /* One could just use enet_host_service() instead. */
-                        //enet_host_service();
-                        enet_host_flush(client);
-                    }
 
                     break;
                 }
             }
         }
+
+        ClientThread.join();
     }
     else 
     {
