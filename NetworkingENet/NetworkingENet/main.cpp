@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <chrono>
 
 using namespace std;
 
@@ -13,13 +14,18 @@ ENetAddress address;
 ENetHost* server = nullptr;
 ENetHost* client = nullptr;
 
-int clientNum = 0;
 int peerCount = 0;
 
 std::thread ServerThread;
 std::thread ClientThread;
+std::thread QuitServerThread;
 
 bool quit = false;
+
+string randomMessages[11] = { "Get out!", "You're scaring me", "That's dumb", "What? Why?", "Please no", 
+"Hello, is anybody out there?", "Leave!", "Duh", "Wait no!", "I don't trust you.", "Huh?"};
+
+int randomTimes[10] = { 5, 6, 9, 13, 16, 20, 24, 30, 32, 40 }; // in seconds
 
 bool CreateServer() 
 {
@@ -83,6 +89,50 @@ void GetInput(ENetHost* user, string userName)
     }
 }
 
+// Send random messages from server at random times to clients
+void SendRandomMessages(ENetHost* user, string userName) 
+{
+    while (!quit) 
+    {
+        int num = rand() % randomMessages->size();
+        string message = userName + ": " + randomMessages[num];
+        ENetPacket* packet = enet_packet_create(message.c_str(),
+            strlen(message.c_str()) + 1,
+            ENET_PACKET_FLAG_RELIABLE);
+
+        /* Send the packet to the peer over channel id 0. */
+        enet_host_broadcast(user, 0, packet);
+
+        enet_host_flush(user);
+
+        num = rand() % sizeof(randomTimes) / sizeof(randomTimes[0]);
+
+        int timeCount = 0;
+
+        while (!quit && timeCount < randomTimes[num])
+        {
+            this_thread::sleep_for(chrono::seconds(1));
+            timeCount++;
+        }
+    }
+}
+
+// Allow user to quit server by typing 'quit'
+void QuitServer() 
+{
+    while (!quit)
+    {
+        string message;
+        getline(cin, message);
+
+        if (message == "quit")
+        {
+            quit = true;
+            cout << "Exited server" << endl;
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (enet_initialize() != 0)
@@ -114,9 +164,12 @@ int main(int argc, char** argv)
         cout << "Enter name: ";
         cin >> serverName;
 
+        cout << "Enter 'quit' at any time to close the server" << endl;
+
         cout << "Connecting..." << endl;
 
-        ServerThread = std::thread (GetInput, server, serverName);
+        ServerThread = std::thread (SendRandomMessages, server, serverName);
+        QuitServerThread = std::thread(QuitServer);
 
         while (!quit) {
             ENetEvent event;
@@ -165,7 +218,9 @@ int main(int argc, char** argv)
         }
 
         ServerThread.join();
+        QuitServerThread.join();
     }
+
     else if (userInput == 2) 
     {
         if (!CreateClient())
@@ -191,6 +246,7 @@ int main(int argc, char** argv)
 
         /* Initiate the connection, allocating the two channels 0 and 1. */
         peer = enet_host_connect(client, &address, 2, 0);
+
         if (peer == NULL)
         {
             fprintf(stderr,
